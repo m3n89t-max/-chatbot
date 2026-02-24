@@ -1,0 +1,57 @@
+# ========================================
+# 환경 변수 설정 템플릿
+# ========================================
+# 이 파일을 복사하여 .env.local 파일을 생성하세요
+# 
+# PowerShell에서:
+# Copy-Item env-template.txt .env.local
+#
+# 그런 다음 아래 값들을 실제 API 키로 변경하세요
+# ========================================
+
+# Supabase 설정
+# Supabase 대시보드 > Project Settings > API 에서 확인
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# OpenAI API 키
+# https://platform.openai.com/api-keys 에서 생성
+OPENAI_API_KEY=sk-proj-...
+
+# Google Gemini API 키
+# https://makersuite.google.com/app/apikey 에서 생성
+GOOGLE_GENERATIVE_AI_API_KEY=AIza...
+
+# Google Cloud Vision API 키 (Service Account JSON)
+# https://console.cloud.google.com/apis/credentials 에서 생성
+# 주의: JSON 전체를 한 줄로 입력해야 합니다
+GOOGLE_CLOUD_VISION_API_KEY={"type":"service_account","project_id":"...","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"...","client_id":"...","auth_uri":"...","token_uri":"...","auth_provider_x509_cert_url":"...","client_x509_cert_url":"..."}
+
+# 시스템 설정 (기본값 사용 가능)
+MAX_RISK_PERCENT=2
+MAX_CONCURRENT_POSITIONS=3
+CONSECUTIVE_LOSS_THRESHOLD=3
+
+# ========================================
+# API 키 발급 방법
+# ========================================
+#
+# 1. Supabase
+#    - https://supabase.com 에서 프로젝트 생성
+#    - Settings > API 메뉴에서 URL과 키 복사
+#
+# 2. OpenAI
+#    - https://platform.openai.com 회원가입
+#    - API Keys 메뉴에서 새 키 생성
+#
+# 3. Google Gemini
+#    - https://makersuite.google.com 접속
+#    - Get API Key 버튼으로 키 생성
+#
+# 4. Google Cloud Vision
+#    - https://console.cloud.google.com 접속
+#    - Vision API 활성화
+#    - Service Account 생성 후 JSON 키 다운로드
+#
+# ========================================

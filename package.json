@@ -1,0 +1,36 @@
+{
+  "name": "neely-rag-trading-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Neely RAG 기반 멀티모델 자동매매 판단 시스템",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^14.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "openai": "^4.28.0",
+    "@google/generative-ai": "^0.2.1",
+    "@google-cloud/vision": "^4.0.2",
+    "langchain": "^0.1.0",
+    "@langchain/openai": "^0.0.19",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.3",
+    "tailwindcss": "^3.4.1",
+    "postcss": "^8.4.33",
+    "autoprefixer": "^10.4.17",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^14.1.0"
+  }
+}
