@@ -1,6 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { GeminiAltOutput } from '@/lib/types'
 
+/** Gemini 모델: 2.5 Flash (채팅·Judge·OCR에서 공통 사용) */
+export const GEMINI_MODEL = 'gemini-2.5-flash'
+
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
 
 /**
@@ -14,7 +17,7 @@ export async function analyzeAlternativeCount(
   symbol: string = 'BTCUSDT',
   timeframe: string = '4H'
 ): Promise<GeminiAltOutput> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
   // GPT가 일반 대화로 답했는지 확인
   const isGeneralChat = gptOutput.scenario_label === "일반 대화"
@@ -155,7 +158,7 @@ export async function analyzeAlternativeCountStream(
   timeframe: string,
   onChunk: (chunk: string) => void
 ): Promise<GeminiAltOutput> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
   const prompt = `
 Alternative NEoWave analysis for ${symbol} (${timeframe}).
@@ -240,7 +243,7 @@ export async function quickRuleCheck(
   scenario: any,
   ragContext: string
 ): Promise<{ isValid: boolean; violations: string[] }> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
   const prompt = `
 Check if this trading scenario violates any NEoWave rules:

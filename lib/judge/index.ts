@@ -1,5 +1,6 @@
 import { GPTOutput, GeminiAltOutput, JudgeScore, FinalDecision, TradingState } from '@/lib/types'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_MODEL } from '@/lib/models/gemini'
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
 
@@ -86,7 +87,7 @@ async function scoreScenario(
   output: GPTOutput | GeminiAltOutput,
   ragContext: string
 ): Promise<JudgeScore> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
   const prompt = `
 You are a strict NEoWave rule validator.

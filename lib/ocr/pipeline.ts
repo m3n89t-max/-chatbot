@@ -1,5 +1,6 @@
-import { extractTextFromImage, batchOCR, validateOCRResult } from './vision'
+import { extractTextFromImage, batchOCR, validateOCRResult, isOCRInsufficientForStructuring } from './vision'
 import { structureOCRText, batchStructure, chunkStructuredData } from './structure'
+import { describeImageForRAG } from './vision-description'
 import { getServiceSupabase } from '@/lib/supabase'
 import { embedText } from '@/lib/rag/embeddings'
 
@@ -20,36 +21,47 @@ export async function processDocument(
     // Step 1: OCR 처리
     console.log(`Starting OCR for ${imageBuffers.length} pages...`)
     const ocrResults = await batchOCR(imageBuffers)
-    
-    // OCR 결과 검증
-    const validResults = ocrResults.filter((result, idx) => {
-      const isValid = validateOCRResult(result)
-      if (!isValid) {
-        console.warn(`Page ${idx + 1} failed validation, skipping...`)
+
+    const validPairs = ocrResults
+      .map((result, idx) => ({ result, pageIndex: idx }))
+      .filter(({ result }) => validateOCRResult(result))
+    const invalidIndices = ocrResults
+      .map((result, idx) => ({ result, idx }))
+      .filter(({ result }) => isOCRInsufficientForStructuring(result))
+      .map(({ idx }) => idx)
+
+    console.log(`OCR completed: ${validPairs.length}/${imageBuffers.length} pages valid, ${invalidIndices.length} fallback to Vision`)
+
+    // Step 2a: 텍스트 충분한 페이지 → Gemini로 텍스트 구조화
+    let textChunks: Array<{ document_id: string; chunk_type: 'rule' | 'exception' | 'definition'; section_title: string; content: string; source_page: number }> = []
+    if (validPairs.length > 0) {
+      console.log('Structuring text with Gemini...')
+      const structuredData = await batchStructure(
+        validPairs.map(({ result, pageIndex }) => ({
+          text: result.text,
+          pageNumber: pageIndex + 1,
+        }))
+      )
+      textChunks = structuredData.flatMap(structured =>
+        chunkStructuredData(structured, documentId)
+      )
+    }
+
+    // Step 2b: OCR 부족한 페이지(그래프·차트 등) → Gemini Vision 이미지 설명
+    let visionChunks: Array<{ document_id: string; chunk_type: 'rule' | 'exception' | 'definition'; section_title: string; content: string; source_page: number }> = []
+    for (const pageIndex of invalidIndices) {
+      try {
+        console.log(`Vision fallback for page ${pageIndex + 1}...`)
+        const structured = await describeImageForRAG(imageBuffers[pageIndex], pageIndex + 1)
+        visionChunks = visionChunks.concat(chunkStructuredData(structured, documentId))
+        await new Promise(resolve => setTimeout(resolve, 800))
+      } catch (err) {
+        console.error(`Vision fallback failed for page ${pageIndex + 1}:`, err)
       }
-      return isValid
-    })
-    
-    console.log(`OCR completed: ${validResults.length}/${imageBuffers.length} pages valid`)
-    
-    // Step 2: Gemini로 구조화
-    console.log('Structuring text with Gemini...')
-    const structuredData = await batchStructure(
-      validResults.map((result, idx) => ({
-        text: result.text,
-        pageNumber: idx + 1
-      }))
-    )
-    
-    console.log(`Structured ${structuredData.length} pages`)
-    
-    // Step 3: 청크로 분할
-    console.log('Creating chunks...')
-    const allChunks = structuredData.flatMap(structured => 
-      chunkStructuredData(structured, documentId)
-    )
-    
-    console.log(`Created ${allChunks.length} chunks`)
+    }
+
+    const allChunks = textChunks.concat(visionChunks)
+    console.log(`Created ${allChunks.length} chunks (${textChunks.length} from text, ${visionChunks.length} from vision)`)
     
     // Step 4: 임베딩 생성 및 DB 저장
     console.log('Generating embeddings and saving to database...')
@@ -82,9 +94,9 @@ export async function processDocument(
     }
     
     console.log(`Pipeline complete: ${savedCount} chunks saved`)
-    
+
     return {
-      pagesProcessed: validResults.length,
+      pagesProcessed: validPairs.length + invalidIndices.length,
       chunksCreated: savedCount,
     }
   } catch (error) {
@@ -94,7 +106,7 @@ export async function processDocument(
 }
 
 /**
- * 단일 페이지 빠른 처리 (테스트용)
+ * 단일 페이지 빠른 처리 (테스트용). OCR 부족 시 Vision 폴백.
  */
 export async function processPage(
   imageBuffer: Buffer,
@@ -102,36 +114,28 @@ export async function processPage(
   pageNumber: number
 ): Promise<number> {
   const supabase = getServiceSupabase()
-  
-  // OCR
+
   const ocrResult = await extractTextFromImage(imageBuffer)
-  
-  if (!validateOCRResult(ocrResult)) {
-    throw new Error('OCR result validation failed')
+  let chunks: Array<{ document_id: string; chunk_type: 'rule' | 'exception' | 'definition'; section_title: string; content: string; source_page: number }>
+
+  if (validateOCRResult(ocrResult)) {
+    const structured = await structureOCRText(ocrResult.text, pageNumber)
+    chunks = chunkStructuredData(structured, documentId)
+  } else {
+    const structured = await describeImageForRAG(imageBuffer, pageNumber)
+    chunks = chunkStructuredData(structured, documentId)
   }
-  
-  // 구조화
-  const structured = await structureOCRText(ocrResult.text, pageNumber)
-  
-  // 청크 생성
-  const chunks = chunkStructuredData(structured, documentId)
-  
-  // 임베딩 및 저장
+
   let savedCount = 0
   for (const chunk of chunks) {
     const embedding = await embedText(chunk.content)
-    
     const { error } = await supabase
       .from('knowledge_chunks')
       .insert({
         ...chunk,
         embedding: embedding,
       })
-    
-    if (!error) {
-      savedCount++
-    }
+    if (!error) savedCount++
   }
-  
   return savedCount
 }

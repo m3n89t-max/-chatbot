@@ -11,10 +11,39 @@ import { v4 as uuidv4 } from 'uuid'
  * POST /api/chat
  * 멀티모델 분석 및 판단
  */
+const CHAT_REQUIRED_ENV = [
+  'OPENAI_API_KEY',
+  'GOOGLE_GENERATIVE_AI_API_KEY',
+  'NEXT_PUBLIC_SUPABASE_URL',
+  'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
+] as const
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { query, conversation_id, symbol = 'BTCUSDT', timeframe = '4H', user_id, image } = body
+    // 환경 변수 누락 시 HTML 500 대신 JSON으로 안내 (이때 발생하는 "Unexpected token '<'" 방지)
+    const missingEnv = CHAT_REQUIRED_ENV.filter(key => !process.env[key])
+    if (missingEnv.length > 0) {
+      return NextResponse.json(
+        {
+          error: `환경 변수가 설정되지 않았습니다: ${missingEnv.join(', ')}. env-template.txt를 복사해 .env.local을 만들고 API 키를 채운 뒤 서버를 다시 실행하세요.`,
+        },
+        { status: 500 }
+      )
+    }
+
+    let body: any
+    try {
+      body = await request.json()
+    } catch (e) {
+      console.error('Chat API: request body parse failed', e)
+      return NextResponse.json(
+        { error: '요청 본문이 너무 크거나 형식이 올바르지 않습니다. 이미지 수를 줄이거나 해상도를 낮춰 보세요.' },
+        { status: 413 }
+      )
+    }
+
+    const { query, conversation_id, symbol = 'BTCUSDT', timeframe = '4H', user_id, image, images } = body
 
     if (!query) {
       return NextResponse.json(
@@ -23,11 +52,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 이미지가 있으면 쿼리에 추가 정보 포함
+    // 단일 이미지(하위 호환) 또는 다중 이미지
+    const imageList = Array.isArray(images) && images.length > 0
+      ? images
+      : image ? [{ dataUrl: image, label: undefined }] : []
+
     let enhancedQuery = query
-    if (image) {
-      enhancedQuery = `[사용자가 차트 이미지를 첨부했습니다]\n\n${query}\n\n이미지를 참고하여 분석해주세요.`
-      console.log('Image attached to query')
+    if (imageList.length > 0) {
+      const labels = imageList.map((img: { label?: string }, i: number) => img.label || `이미지 ${i + 1}`).filter(Boolean)
+      const labelText = labels.length > 0
+        ? ` (${labels.join(', ')} 등)`
+        : ''
+      enhancedQuery = `[사용자가 차트 이미지 ${imageList.length}장을 첨부했습니다${labelText}]\n\n중기·단기 관점이 모두 반영된 다중 시간봉 분석을 요청합니다. 단타 위주로 진입/무효화를 제시해주세요.\n\n${query}\n\n각 이미지(시간봉)를 참고하여 분석해주세요.`
+      console.log('Images attached to query:', imageList.length, labels.length ? labels : '')
     }
 
     const supabase = getServiceSupabase()

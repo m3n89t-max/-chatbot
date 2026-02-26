@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { StructuredOCROutput, Rule, Exception } from '@/lib/types'
+import { GEMINI_MODEL } from '@/lib/models/gemini'
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
 
@@ -10,7 +11,7 @@ export async function structureOCRText(
   rawText: string,
   pageNumber: number
 ): Promise<StructuredOCROutput> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
   const prompt = `
 You are analyzing a page from Glenn Neely's NEoWave educational material.

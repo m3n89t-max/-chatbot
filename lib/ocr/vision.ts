@@ -79,24 +79,32 @@ export async function batchOCR(
 }
 
 /**
- * OCR 결과 품질 검증
+ * OCR 결과 품질 검증 (텍스트 기반 구조화에 충분한지)
  */
 export function validateOCRResult(result: OCRResult): boolean {
   // 최소 신뢰도 체크
   if (result.confidence < 0.7) {
     return false
   }
-  
+
   // 최소 텍스트 길이 체크
   if (result.text.length < 50) {
     return false
   }
-  
+
   // 특수문자 비율 체크 (너무 많으면 노이즈일 가능성)
   const specialCharRatio = (result.text.match(/[^a-zA-Z0-9\s]/g) || []).length / result.text.length
   if (specialCharRatio > 0.5) {
     return false
   }
-  
+
   return true
+}
+
+/**
+ * OCR 결과가 부족한지 여부 (그래프/차트 등 이미지 위주 페이지 → Gemini Vision 폴백용)
+ * true이면 해당 페이지는 이미지 설명(Vision) 단계로 보냄
+ */
+export function isOCRInsufficientForStructuring(result: OCRResult): boolean {
+  return !validateOCRResult(result)
 }

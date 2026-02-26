@@ -3,11 +3,22 @@
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 
+/** 업로드된 차트 이미지 1개 (시간봉 라벨 선택 가능) */
+export interface UploadedChartImage {
+  dataUrl: string
+  label?: string // 예: '5분봉', '15분봉', '1시간봉', '4시간봉', '일봉', '주봉'
+}
+
+const TIMEFRAME_LABELS: UploadedChartImage['label'][] = ['5분봉', '15분봉', '1시간봉', '4시간봉', '일봉', '주봉']
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
   data?: any
-  imageUrl?: string // 이미지 URL 추가
+  /** 단일 이미지 (하위 호환) */
+  imageUrl?: string
+  /** 다중 이미지 (dataUrl + 선택적 라벨) */
+  imageUrls?: UploadedChartImage[]
 }
 
 interface Conversation {
@@ -24,7 +35,7 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [uploadedImage, setUploadedImage] = useState<string | null>(null) // 업로드된 이미지
+  const [uploadedImages, setUploadedImages] = useState<UploadedChartImage[]>([]) // 여러 장 업로드 (5분봉·15분봉·일봉 등)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const userId = 'demo-user'
@@ -82,20 +93,23 @@ export default function ChatPage() {
     setCurrentConversationId(null)
     setMessages([])
     setInput('')
-    setUploadedImage(null) // 이미지 초기화
+    setUploadedImages([])
+  }
+
+  const addImageToQueue = (dataUrl: string, label?: string) => {
+    setUploadedImages(prev => [...prev, { dataUrl, label }])
   }
 
   const handleImagePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
-
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
         const file = items[i].getAsFile()
         if (file) {
           const reader = new FileReader()
           reader.onload = (event) => {
-            setUploadedImage(event.target?.result as string)
+            addImageToQueue(event.target?.result as string)
           }
           reader.readAsDataURL(file)
         }
@@ -104,21 +118,35 @@ export default function ChatPage() {
   }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
+    const files = e.target.files
+    if (!files?.length) return
+    let index = 0
+    const processNext = () => {
+      if (index >= files.length) {
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        return
+      }
+      const file = files[index]
       const reader = new FileReader()
       reader.onload = (event) => {
-        setUploadedImage(event.target?.result as string)
+        addImageToQueue(event.target?.result as string)
+        index++
+        processNext()
       }
       reader.readAsDataURL(file)
     }
+    processNext()
   }
 
-  const removeImage = () => {
-    setUploadedImage(null)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
+  const removeImage = (idx: number) => {
+    setUploadedImages(prev => prev.filter((_, i) => i !== idx))
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const setImageLabel = (idx: number, label: UploadedChartImage['label']) => {
+    setUploadedImages(prev =>
+      prev.map((img, i) => (i === idx ? { ...img, label } : img))
+    )
   }
 
   const deleteConversation = async (conversationId: string) => {
@@ -142,18 +170,20 @@ export default function ChatPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if ((!input.trim() && !uploadedImage) || loading) return
+    const hasImages = uploadedImages.length > 0
+    if ((!input.trim() && !hasImages) || loading) return
 
+    const currentImages = [...uploadedImages]
     const userMessage: Message = {
       role: 'user',
       content: input || '차트 이미지 분석 요청',
-      imageUrl: uploadedImage || undefined,
+      imageUrls: currentImages.length ? currentImages : undefined,
+      imageUrl: currentImages.length === 1 ? currentImages[0].dataUrl : undefined,
     }
 
     setMessages(prev => [...prev, userMessage])
     setInput('')
-    const currentImage = uploadedImage
-    setUploadedImage(null) // 이미지 초기화
+    setUploadedImages([])
     setLoading(true)
 
     try {
@@ -166,11 +196,21 @@ export default function ChatPage() {
           symbol: 'BTCUSDT',
           timeframe: '4H',
           user_id: userId,
-          image: currentImage, // 이미지 데이터 전송
+          images: currentImages, // 다중 이미지 (dataUrl + 라벨)
         }),
       })
 
-      const data = await response.json()
+      const rawText = await response.text()
+      let data: any
+      try {
+        data = rawText ? JSON.parse(rawText) : {}
+      } catch {
+        // 서버가 HTML 에러 페이지를 반환한 경우 (413/500 등)
+        const hint = response.status === 413
+          ? '요청 크기가 너무 큽니다. 이미지 수를 줄이거나 해상도를 낮춰 보세요.'
+          : '서버 오류가 발생했습니다. 잠시 후 다시 시도하거나 이미지 수를 줄여 보세요.'
+        throw new Error(`${hint} (${response.status})`)
+      }
 
       if (!response.ok) {
         throw new Error(data.error || '분석 실패')
@@ -307,30 +347,52 @@ export default function ChatPage() {
         {/* Input */}
         <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4">
           <div className="max-w-4xl mx-auto">
-            {/* 이미지 미리보기 */}
-            {uploadedImage && (
-              <div className="mb-3 relative inline-block">
-                <img 
-                  src={uploadedImage} 
-                  alt="업로드된 차트" 
-                  className="max-h-40 rounded-lg border-2 border-blue-500"
-                />
-                <button
-                  onClick={removeImage}
-                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600 transition-colors"
-                  type="button"
-                >
-                  ×
-                </button>
+            {/* 다중 이미지 미리보기 (5분봉·15분봉·일봉 등 한꺼번에) */}
+            {uploadedImages.length > 0 && (
+              <div className="mb-3">
+                {uploadedImages.length > 4 && (
+                  <p className="text-amber-600 dark:text-amber-400 text-sm mb-2">
+                    이미지가 많으면 요청이 실패할 수 있습니다. 4~6장 이하·해상도 낮춤을 권장합니다.
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                {uploadedImages.map((img, idx) => (
+                  <div key={idx} className="relative inline-block">
+                    <img
+                      src={img.dataUrl}
+                      alt={img.label || `차트 ${idx + 1}`}
+                      className="max-h-32 rounded-lg border-2 border-blue-500 object-cover"
+                    />
+                    <select
+                      value={img.label ?? ''}
+                      onChange={(e) => setImageLabel(idx, (e.target.value || undefined) as UploadedChartImage['label'])}
+                      className="absolute bottom-0 left-0 right-0 rounded-b bg-black/70 text-white text-xs py-1 px-1 cursor-pointer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <option value="">시간봉 선택</option>
+                      {TIMEFRAME_LABELS.map(l => (
+                        <option key={l} value={l}>{l}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => removeImage(idx)}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600 transition-colors"
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                </div>
               </div>
             )}
-            
+
             <form onSubmit={handleSubmit} className="flex gap-2">
-              {/* 이미지 업로드 버튼 */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleImageUpload}
                 className="hidden"
                 id="image-upload"
@@ -338,23 +400,23 @@ export default function ChatPage() {
               <label
                 htmlFor="image-upload"
                 className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-4 py-3 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 cursor-pointer font-semibold transition-colors flex items-center justify-center"
-                title="차트 이미지 업로드"
+                title="차트 이미지 여러 장 업로드 (5분봉·15분봉·일봉 등)"
               >
                 📎
               </label>
-              
+
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onPaste={handleImagePaste}
-                placeholder="차트 상황을 설명하거나 이미지를 붙여넣으세요... (Ctrl+V)"
+                placeholder="차트 상황을 설명하거나 이미지를 붙여넣으세요... (Ctrl+V, 여러 장 가능)"
                 className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 disabled={loading}
               />
               <button
                 type="submit"
-                disabled={loading || (!input.trim() && !uploadedImage)}
+                disabled={loading || (!input.trim() && uploadedImages.length === 0)}
                 className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold transition-colors"
               >
                 전송
@@ -375,6 +437,8 @@ function WelcomeScreen({ onExampleClick }: { onExampleClick: (text: string) => v
       </h2>
       <p className="text-gray-600 dark:text-gray-400 mb-8">
         차트 상황을 설명하면 AI가 NEoWave 이론을 바탕으로 분석합니다.
+        <br />
+        <span className="text-sm">5분봉·15분봉·1시간봉·4시간봉·일봉·주봉 등 여러 장을 한꺼번에 올리면 중기·단기 관점으로 단타 위주 분석을 받을 수 있습니다.</span>
       </p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
         <ExampleQuery
@@ -402,10 +466,28 @@ function MessageBubble({ message }: { message: Message }) {
             U
           </div>
           <div className="flex-1 rounded-lg p-4 bg-blue-600 text-white">
-            {message.imageUrl && (
-              <img 
-                src={message.imageUrl} 
-                alt="업로드된 차트" 
+            {message.imageUrls && message.imageUrls.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {message.imageUrls.map((img, i) => (
+                  <div key={i} className="relative">
+                    <img
+                      src={img.dataUrl}
+                      alt={img.label || `차트 ${i + 1}`}
+                      className="max-w-[200px] max-h-32 rounded-lg border-2 border-white object-cover"
+                    />
+                    {img.label && (
+                      <span className="absolute bottom-0 left-0 right-0 rounded-b bg-black/70 text-white text-xs py-0.5 text-center">
+                        {img.label}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {!message.imageUrls?.length && message.imageUrl && (
+              <img
+                src={message.imageUrl}
+                alt="업로드된 차트"
                 className="max-w-md rounded-lg mb-2 border-2 border-white"
               />
             )}

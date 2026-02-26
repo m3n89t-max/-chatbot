@@ -45,18 +45,19 @@ export async function POST(request: NextRequest) {
     if (docError) {
       console.error('Document insert error:', docError)
       return NextResponse.json(
-        { error: 'Failed to create document record' },
+        { error: docError.message || 'Failed to create document record' },
         { status: 500 }
       )
     }
 
-    // 2. Supabase Storage에 파일 업로드
-    const fileName = `${documentId}/${file.name}`
+    // 2. Supabase Storage에 파일 업로드 (키에 한글/공백 불가 → documentId + 확장자만 사용)
+    const ext = file.name.includes('.pdf') ? 'pdf' : 'png'
+    const storageKey = `${documentId}/file.${ext}`
     const fileBuffer = await file.arrayBuffer()
-    
+
     const { error: uploadError } = await supabase.storage
       .from('documents')
-      .upload(fileName, fileBuffer, {
+      .upload(storageKey, fileBuffer, {
         contentType: file.type,
         upsert: false,
       })
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     if (uploadError) {
       console.error('File upload error:', uploadError)
       return NextResponse.json(
-        { error: 'Failed to upload file' },
+        { error: uploadError.message || 'Failed to upload file' },
         { status: 500 }
       )
     }
@@ -76,21 +77,33 @@ export async function POST(request: NextRequest) {
       imageBuffers = [Buffer.from(fileBuffer)]
       
       // 페이지 정보 저장
-      await supabase.from('document_pages').insert({
+      const { error: pageError } = await supabase.from('document_pages').insert({
         document_id: documentId,
         page_no: 1,
-        image_path: fileName,
+        image_path: storageKey,
       })
+      if (pageError) {
+        console.error('Document page insert error:', pageError)
+        return NextResponse.json(
+          { error: pageError.message || 'Failed to save page info' },
+          { status: 500 }
+        )
+      }
     } else {
       // PDF 처리는 별도 라이브러리 필요 (pdf-parse 등)
-      // 여기서는 간단히 단일 페이지로 처리
       imageBuffers = [Buffer.from(fileBuffer)]
-      
-      await supabase.from('document_pages').insert({
+      const { error: pageError } = await supabase.from('document_pages').insert({
         document_id: documentId,
         page_no: 1,
-        image_path: fileName,
+        image_path: storageKey,
       })
+      if (pageError) {
+        console.error('Document page insert error:', pageError)
+        return NextResponse.json(
+          { error: pageError.message || 'Failed to save page info' },
+          { status: 500 }
+        )
+      }
     }
 
     // 4. OCR 파이프라인 실행 (비동기)
@@ -109,10 +122,11 @@ export async function POST(request: NextRequest) {
       pages: imageBuffers.length,
     })
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Upload API error:', error)
+    const message = error?.message || String(error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: message || 'Internal server error' },
       { status: 500 }
     )
   }
